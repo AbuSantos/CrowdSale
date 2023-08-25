@@ -1,37 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.19;
 import "./SafeMath.sol";
+import "./IERC20.sol";
 
-// import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.3/contracts/interfaces/IERC20.sol";
-// import "./ERC20.sol";
-// import "https://github.com/ConsenSysMesh/openzeppelin-solidity/blob/master/contracts/token/ERC20/ERC20.sol";
-// import "https://github.com/ConsenSysMesh/openzeppelin-solidity/blob/master/contracts/math/SafeMath.sol";
-
-interface IERC20 {
-    function totalSupply() external view returns (uint);
-
-    function balanceOf(address account) external view returns (uint);
-
-    function transfer(address recipient, uint amount) external returns (bool);
-
-    function allowance(
-        address owner,
-        address spender
-    ) external view returns (uint);
-
-    function approve(address spender, uint amount) external returns (bool);
-
-    function transferFrom(
-        address sender,
-        address recipient,
-        uint amount
-    ) external returns (bool);
-
-    event Transfer(address indexed from, address indexed to, uint value);
-    event Approval(address indexed owner, address indexed spender, uint value);
-
-    function burn(uint256 _value) external returns (bool success);
-}
 
 contract Crowdsale {
     using SafeMath for uint256;
@@ -47,6 +18,15 @@ contract Crowdsale {
 
     // Amount of wei raised
     uint256 public weiRaised;
+
+    mapping(address => uint256) public contributions;
+    mapping(address => uint256) public caps;
+    uint public cap;
+
+    uint public openingTime;
+    uint public closingTime;
+
+    mapping (address => bool) whiteList;
 
     event Received(address sender, uint amount);
     /**
@@ -69,24 +49,43 @@ contract Crowdsale {
      * @param _token Address of the token being sold
      */
 
-    constructor(uint256 _rate, address _wallet, address _token) {
+    constructor(uint256 _rate, address _wallet, address _token/*, uint _cap uint _openingTime, uint _closingTime*/) {
         require(_rate > 0);
         require(_wallet != address(0));
         require(_token != address(0));
+        // require(cap>0);
+        // require(_openingTime >= block.timestamp);
+        // require(_closingTime >= _openingTime);
 
         rate = _rate;
         wallet = _wallet;
         token = IERC20(_token);
+        // cap = _cap;
+
+        // openingTime = _openingTime;
+        // closingTime = _closingTime;
+    }
+
+
+    // modifier onlyWhileOpen{
+    //     require( block.timestamp >= openingTime  && block.timestamp <= closingTime);
+    //     _;
+    // }
+
+    modifier isWhitelisted(address _investor) {
+         require(whiteList[_investor]);
+    _;
     }
 
     /**
    * @dev fallback function ***DO NOT OVERRIDE***
   //  */
-    fallback() external payable {
-        buyTokens(msg.sender);
-    }
+    // fallback() external payable {
+    //     buyTokens(msg.sender);
+    // }
 
     receive() external payable {
+        buyTokens(msg.sender);
         emit Received(msg.sender, msg.value);
     }
 
@@ -103,12 +102,13 @@ contract Crowdsale {
 
         // update state
         weiRaised = weiRaised.add(weiAmount);
+        require(weiRaised.add(weiAmount)<=cap);
         _processPurchase(_beneficiary, tokens);
 
         emit TokenPurchase(msg.sender, _beneficiary, weiAmount, tokens);
 
         _updatePurchasingState(_beneficiary, weiAmount);
-        _forwardFunds(msg.value);
+        _forwardFunds();
         _postValidatePurchase(_beneficiary, weiAmount);
     }
 
@@ -189,18 +189,62 @@ contract Crowdsale {
     /**
      * @dev Determines how ETH is stored/forwarded on purchases.
      */
-    function _forwardFunds(uint256 _value) internal {
-        // bool sent =  wallet.transfer(address(wallet),msg.value);
+    function _forwardFunds() internal {
         address payable receiver = payable(wallet);
-        receiver.transfer(_value);
+        // bool sent =  wallet.transfer(address(wallet),msg.value);
+        receiver.transfer(msg.value);
         // require(sent, "Transaction failed");
     }
 
-    function getWallet() public view returns (uint) {
+    function getWalletBalance() public view returns (uint) {
         return address(wallet).balance;
     }
 
     function getTokenBalance() public view returns (uint) {
         return address(token).balance;
     }
+
+ 
+    function getUserCap(address _beneficiary) external view returns (uint256){
+        return caps[_beneficiary];
+    }
+
+    function getUserContributions(address _beneficiary) external view returns (uint256){
+        return contributions[_beneficiary];
+    }
+
+    function addToWhiteList(address _investor) external{
+        whiteList[_investor]=true;
+    }
+
+    function removeFromWhiteList(address _investor) external{
+        whiteList[_investor]=false;
+    }
+
+    function setGroupWhiteList (address[] memory _investors)external /*onlyOwner*/{
+        for (uint i=0; i < _investors.length ; i++) 
+        {
+           whiteList[ _investors[i]]=true;
+        }
+    }
+
+    function setCap (address _beneficiary, uint _cap ) external {
+        caps[_beneficiary]=_cap;
+    }
+
+    function setGroupCap (address[] memory _beneficiaries, uint256 _cap)external /*onlyOwner*/{
+        for (uint i=0; i < _beneficiaries.length ; i++) 
+        {
+           caps[ _beneficiaries[i]] = _cap;
+        }
+    }
+
+    function capReached() public view returns (bool){
+       return weiRaised>=cap;
+    }
+
+    // function hasClosed() external view returns (bool) {
+    //      return block.timestamp > closingTime;
+    // }
+
 }
